@@ -1,325 +1,408 @@
-// Library Search (client-only)
-// - Loads books.json (generated from CSV)
-// - Searches locally
-// - Fetches cover + description from Open Library on demand (cached in localStorage)
+// app.js
+// Displays only: Title, Author, ISBN, Cover, Description
+// Data source: books.json (your repo already has this)
+// Enrichment: Open Library first, Google Books fallback (better coverage)
+// Genre filter: from Google Books categories (or OL subjects)
+
+const DATA_URL = "books.json";
+
+// ✅ Put your Google Books API key here
+const GOOGLE_BOOKS_API_KEY = "PASTE_YOUR_KEY_HERE";
+
+// Cache keys (localStorage)
+const CACHE_PREFIX = "book_enrich_v1:";
 
 const els = {
-  q: document.getElementById('q'),
-  grid: document.getElementById('grid'),
-  count: document.getElementById('count'),
-  clearBtn: document.getElementById('clearBtn'),
-  sectionFilter: document.getElementById('sectionFilter'),
-  modal: document.getElementById('modal'),
-  closeModal: document.getElementById('closeModal'),
-  mTitle: document.getElementById('mTitle'),
-  mBy: document.getElementById('mBy'),
-  mCover: document.getElementById('mCover'),
-  mDesc: document.getElementById('mDesc'),
-  mCatalog: document.getElementById('mCatalog'),
-  mPills: document.getElementById('mPills'),
+  search: document.getElementById("search"),
+  results: document.getElementById("results"),
+  status: document.getElementById("status"),
+  genreFilter: document.getElementById("genreFilter"),
 };
 
-let books = [];
-let filtered = [];
-let coverCache = new Map(); // session cache
+let BOOKS = [];
+let ENRICHED = [];
 
-function norm(s){ return (s||'').toString().toLowerCase().trim(); }
-
-function bookSearchText(b){
-  return [
-    b.title, b.subtitle, b.series,
-    ...(b.authors||[]),
-    b.publisher, b.section, b.location,
-    b.isbn, b.subjects,
-    ...(b.callNumbers||[])
-  ].filter(Boolean).join(' • ').toLowerCase();
+// ---------- helpers ----------
+function norm(s) {
+  return (s ?? "").toString().trim();
 }
 
-function uniq(arr){ return Array.from(new Set(arr.filter(Boolean))); }
+function cleanIsbn(isbn) {
+  return norm(isbn).replace(/[^0-9Xx]/g, "").toUpperCase();
+}
 
-function makeCard(b){
-  const card = document.createElement('div');
-  card.className = 'card';
-  card.tabIndex = 0;
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
 
-  const img = document.createElement('img');
-  img.className = 'cover';
-  img.alt = `Cover for ${b.title}`;
-  img.loading = 'lazy';
-  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(placeholderSvg(b.title));
+function cacheGet(key) {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
-  const body = document.createElement('div');
-  body.className = 'cardBody';
+function cacheSet(key, value) {
+  try {
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(value));
+  } catch {}
+}
 
-  const t = document.createElement('div');
-  t.className = 'cardTitle';
-  t.textContent = b.title;
+function pickFirstNonEmpty(...vals) {
+  for (const v of vals) {
+    if (v && String(v).trim()) return v;
+  }
+  return "";
+}
 
-  const by = document.createElement('div');
-  by.className = 'cardBy';
-  by.textContent = (b.authors && b.authors.length) ? b.authors.join(', ') : '';
+function stripHtml(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html ?? "";
+  return div.textContent || div.innerText || "";
+}
 
-  const badges = document.createElement('div');
-  badges.className = 'badges';
-  const badgeVals = uniq([b.section, b.location, b.callNumbers?.[0]]);
-  badgeVals.slice(0,3).forEach(x=>{
-    const s = document.createElement('span');
-    s.className = 'badge';
-    s.textContent = x;
-    badges.appendChild(s);
-  });
+function bestGenreFromCategories(categories = []) {
+  // categories from Google are usually decent already; we lightly normalize
+  if (!Array.isArray(categories) || categories.length === 0) return "Unknown";
+  // return first category but shorten if it's long
+  const c = String(categories[0]).trim();
+  if (!c) return "Unknown";
+  return c.length > 40 ? c.slice(0, 40) + "…" : c;
+}
 
-  body.appendChild(t);
-  body.appendChild(by);
-  body.appendChild(badges);
+function bestGenreFromSubjects(subjects = []) {
+  const s = subjects.map(x => String(x).toLowerCase());
 
-  card.appendChild(img);
-  card.appendChild(body);
+  const rules = [
+    ["Mystery / Thriller", ["mystery", "detective", "crime", "thriller", "suspense"]],
+    ["Science Fiction", ["science fiction", "sci-fi", "space", "dystopia"]],
+    ["Fantasy", ["fantasy", "magic", "dragons"]],
+    ["Romance", ["romance", "love stories"]],
+    ["Biography", ["biography", "autobiography", "memoirs"]],
+    ["History", ["history", "historical"]],
+    ["Religion", ["christian", "religion", "bible", "catholic"]],
+    ["Kids / YA", ["juvenile", "children", "young adult"]],
+    ["Self-Help", ["self-help", "personal development"]],
+    ["Business", ["business", "economics", "finance"]],
+    ["Nonfiction", ["nonfiction", "non-fiction"]],
+    ["Fiction", ["fiction", "novel"]],
+  ];
 
-  // lazy fetch cover
-  fetchCoverAndMaybeDesc(b).then(info=>{
-    if(info?.coverUrl){
-      img.src = info.coverUrl;
+  for (const [genre, keywords] of rules) {
+    if (keywords.some(k => s.some(v => v.includes(k)))) return genre;
+  }
+  return "Unknown";
+}
+
+// ---------- fetch + parse ----------
+async function loadBooks() {
+  const res = await fetch(DATA_URL, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Failed to load ${DATA_URL} (${res.status})`);
+  const data = await res.json();
+
+  // try to be flexible about column names
+  return data.map((row, idx) => {
+    const title = pickFirstNonEmpty(row.Title, row.title, row["Book Title"], row["book title"]);
+    const author = pickFirstNonEmpty(row.Author, row.author, row.Auther, row.auther);
+    const isbnRaw = pickFirstNonEmpty(row.ISBN, row.isbn, row["ISBN-13"], row["ISBN13"], row["isbn13"]);
+    const isbn = cleanIsbn(isbnRaw);
+
+    return {
+      _id: idx,
+      title,
+      author,
+      isbn,
+      coverUrl: "",       // filled by enrichment
+      description: "",    // filled by enrichment
+      genre: "Unknown",   // filled by enrichment
+      source: "",         // OL / GB
+    };
+  }).filter(b => b.title || b.author || b.isbn);
+}
+
+// ---------- Open Library ----------
+async function openLibraryByIsbn(isbn) {
+  // OL Books API by ISBN
+  const url = `https://openlibrary.org/isbn/${encodeURIComponent(isbn)}.json`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const edition = await r.json();
+
+  // cover: use covers array or cover service
+  let coverUrl = "";
+  if (Array.isArray(edition.covers) && edition.covers.length) {
+    coverUrl = `https://covers.openlibrary.org/b/id/${edition.covers[0]}-L.jpg`;
+  } else if (isbn) {
+    coverUrl = `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbn)}-L.jpg`;
+  }
+
+  // description: sometimes on edition, sometimes on work
+  let description = "";
+  if (typeof edition.description === "string") description = edition.description;
+  if (typeof edition.description === "object" && edition.description?.value) description = edition.description.value;
+
+  // subjects: sometimes on edition
+  const subjects = Array.isArray(edition.subjects) ? edition.subjects : [];
+
+  // If no description, try work
+  if (!description && Array.isArray(edition.works) && edition.works[0]?.key) {
+    const workKey = edition.works[0].key;
+    const wr = await fetch(`https://openlibrary.org${workKey}.json`);
+    if (wr.ok) {
+      const work = await wr.json();
+      if (typeof work.description === "string") description = work.description;
+      if (typeof work.description === "object" && work.description?.value) description = work.description.value;
+      if (Array.isArray(work.subjects) && work.subjects.length) {
+        subjects.push(...work.subjects);
+      }
     }
-  }).catch(()=>{});
+  }
 
-  const open = () => openModal(b, img.src);
-  card.addEventListener('click', open);
-  card.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' || e.key === ' ') open(); });
-
-  return card;
+  // If cover URL points to a missing image, OL returns a placeholder but still 200 sometimes.
+  // We'll accept it; Google fallback will replace if needed.
+  return {
+    coverUrl,
+    description: description ? stripHtml(description) : "",
+    subjects,
+  };
 }
 
-function render(){
-  els.grid.innerHTML = '';
-  const frag = document.createDocumentFragment();
-  filtered.slice(0, 250).forEach(b => frag.appendChild(makeCard(b)));
-  els.grid.appendChild(frag);
+async function openLibrarySearch(title, author) {
+  const q = [];
+  if (title) q.push(`title=${encodeURIComponent(title)}`);
+  if (author) q.push(`author=${encodeURIComponent(author)}`);
+  const url = `https://openlibrary.org/search.json?${q.join("&")}&limit=1`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const data = await r.json();
+  const doc = data?.docs?.[0];
+  if (!doc) return null;
 
-  const total = filtered.length;
-  els.count.textContent = total.toLocaleString() + ' result' + (total===1?'':'s') +
-    (total>250 ? ' (showing first 250)' : '');
+  let coverUrl = "";
+  if (doc.cover_i) coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
+
+  // OL search doesn’t reliably give descriptions; use subjects if present
+  const subjects = Array.isArray(doc.subject) ? doc.subject : [];
+  const isbn = Array.isArray(doc.isbn) && doc.isbn.length ? cleanIsbn(doc.isbn[0]) : "";
+
+  return {
+    coverUrl,
+    description: "",
+    subjects,
+    isbn,
+  };
 }
 
-function applyFilters(){
-  const q = norm(els.q.value);
-  const section = els.sectionFilter.value;
+// ---------- Google Books (fallback) ----------
+async function googleBooksByIsbn(isbn) {
+  if (!GOOGLE_BOOKS_API_KEY) return null;
+  const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&key=${encodeURIComponent(GOOGLE_BOOKS_API_KEY)}`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const data = await r.json();
+  const item = data?.items?.[0];
+  if (!item?.volumeInfo) return null;
 
-  filtered = books.filter(b=>{
-    if(section && b.section !== section) return false;
-    if(!q) return true;
-    return bookSearchText(b).includes(q);
+  const info = item.volumeInfo;
+  const coverUrl =
+    info.imageLinks?.thumbnail ||
+    info.imageLinks?.smallThumbnail ||
+    "";
+
+  return {
+    coverUrl: coverUrl ? coverUrl.replace("http://", "https://") : "",
+    description: info.description ? stripHtml(info.description) : "",
+    categories: Array.isArray(info.categories) ? info.categories : [],
+  };
+}
+
+async function googleBooksSearch(title, author) {
+  if (!GOOGLE_BOOKS_API_KEY) return null;
+  let q = "";
+  if (title) q += `intitle:${title}`;
+  if (author) q += (q ? "+" : "") + `inauthor:${author}`;
+
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1&key=${encodeURIComponent(GOOGLE_BOOKS_API_KEY)}`;
+  const r = await fetch(url);
+  if (!r.ok) return null;
+  const data = await r.json();
+  const item = data?.items?.[0];
+  if (!item?.volumeInfo) return null;
+
+  const info = item.volumeInfo;
+  const coverUrl =
+    info.imageLinks?.thumbnail ||
+    info.imageLinks?.smallThumbnail ||
+    "";
+
+  return {
+    coverUrl: coverUrl ? coverUrl.replace("http://", "https://") : "",
+    description: info.description ? stripHtml(info.description) : "",
+    categories: Array.isArray(info.categories) ? info.categories : [],
+  };
+}
+
+// ---------- enrichment pipeline ----------
+async function enrichBook(book) {
+  const cacheKey = book.isbn ? `isbn:${book.isbn}` : `ta:${book.title}|${book.author}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return { ...book, ...cached };
+
+  let coverUrl = "";
+  let description = "";
+  let genre = "Unknown";
+  let source = "";
+
+  // 1) Open Library by ISBN
+  if (book.isbn) {
+    const ol = await openLibraryByIsbn(book.isbn);
+    if (ol) {
+      coverUrl = ol.coverUrl || "";
+      description = ol.description || "";
+      genre = bestGenreFromSubjects(ol.subjects || []);
+      source = "OL";
+    }
+  }
+
+  // 2) Open Library search fallback (title/author)
+  if ((!coverUrl || !description) && (book.title || book.author)) {
+    const ols = await openLibrarySearch(book.title, book.author);
+    if (ols) {
+      coverUrl = coverUrl || (ols.coverUrl || "");
+      description = description || ""; // OL search usually no description
+      if (genre === "Unknown") genre = bestGenreFromSubjects(ols.subjects || []);
+      source = source || "OL";
+      // If OL search gave us an ISBN and we didn't have one, we could optionally retry OL-by-ISBN,
+      // but we keep it simple to avoid lots of requests.
+    }
+  }
+
+  // 3) Google Books by ISBN (best fallback)
+  if ((!coverUrl || !description || genre === "Unknown") && book.isbn) {
+    const gb = await googleBooksByIsbn(book.isbn);
+    if (gb) {
+      coverUrl = coverUrl || gb.coverUrl || "";
+      description = description || gb.description || "";
+      if (genre === "Unknown") genre = bestGenreFromCategories(gb.categories || []);
+      source = "GB";
+    }
+  }
+
+  // 4) Google Books search fallback
+  if ((!coverUrl || !description || genre === "Unknown") && (book.title || book.author)) {
+    const gb = await googleBooksSearch(book.title, book.author);
+    if (gb) {
+      coverUrl = coverUrl || gb.coverUrl || "";
+      description = description || gb.description || "";
+      if (genre === "Unknown") genre = bestGenreFromCategories(gb.categories || []);
+      source = "GB";
+    }
+  }
+
+  const enriched = { coverUrl, description, genre, source };
+  cacheSet(cacheKey, enriched);
+  return { ...book, ...enriched };
+}
+
+// ---------- render ----------
+function buildGenreFilter(books) {
+  const genres = Array.from(new Set(books.map(b => b.genre || "Unknown")))
+    .map(g => g || "Unknown")
+    .sort((a, b) => a.localeCompare(b));
+
+  els.genreFilter.innerHTML =
+    `<option value="">All Genres</option>` +
+    genres.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function matchesSearch(b, q) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  return (
+    (b.title || "").toLowerCase().includes(q) ||
+    (b.author || "").toLowerCase().includes(q) ||
+    (b.isbn || "").toLowerCase().includes(q)
+  );
+}
+
+function render() {
+  const q = norm(els.search?.value).toLowerCase();
+  const g = els.genreFilter?.value || "";
+
+  const filtered = ENRICHED.filter(b => {
+    const okSearch = matchesSearch(b, q);
+    const okGenre = !g || (b.genre === g);
+    return okSearch && okGenre;
   });
 
+  els.status.textContent = `${filtered.length} book(s)`;
+
+  els.results.innerHTML = filtered.map(b => {
+    const cover = b.coverUrl
+      ? `<img class="cover" src="${escapeHtml(b.coverUrl)}" alt="Cover for ${escapeHtml(b.title)}" loading="lazy">`
+      : `<div class="cover placeholder">No cover</div>`;
+
+    const desc = b.description ? escapeHtml(b.description) : "No description found.";
+
+    return `
+      <div class="card">
+        ${cover}
+        <div class="meta">
+          <div class="title">${escapeHtml(b.title || "Untitled")}</div>
+          <div class="author">${escapeHtml(b.author || "Unknown author")}</div>
+          <div class="isbn">ISBN: ${escapeHtml(b.isbn || "—")}</div>
+          <div class="genre">Genre: ${escapeHtml(b.genre || "Unknown")}</div>
+          <div class="desc">${desc}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+// ---------- init ----------
+async function main() {
+  els.status.textContent = "Loading books…";
+  BOOKS = await loadBooks();
+
+  // Enrich with gentle throttling so you don’t hammer APIs
+  els.status.textContent = `Enriching ${BOOKS.length} books…`;
+  ENRICHED = [];
+
+  for (let i = 0; i < BOOKS.length; i++) {
+    const b = BOOKS[i];
+    const e = await enrichBook(b);
+    ENRICHED.push(e);
+
+    if (i % 10 === 0) {
+      els.status.textContent = `Enriching… ${i + 1}/${BOOKS.length}`;
+      render(); // progressive render feels snappy
+    }
+
+    // tiny delay helps avoid rate limits
+    await sleep(120);
+  }
+
+  buildGenreFilter(ENRICHED);
+
+  // events
+  els.search?.addEventListener("input", render);
+  els.genreFilter?.addEventListener("change", render);
+
+  els.status.textContent = `Loaded ${ENRICHED.length} books`;
   render();
 }
 
-function buildSectionFilter(){
-  const sections = uniq(books.map(b=>b.section)).sort((a,b)=>a.localeCompare(b));
-  for(const s of sections){
-    const opt = document.createElement('option');
-    opt.value = s;
-    opt.textContent = s;
-    els.sectionFilter.appendChild(opt);
-  }
-}
-
-els.q.addEventListener('input', () => {
-  // tiny debounce
-  clearTimeout(window.__t);
-  window.__t = setTimeout(applyFilters, 60);
-});
-
-els.sectionFilter.addEventListener('change', applyFilters);
-
-els.clearBtn.addEventListener('click', () => {
-  els.q.value = '';
-  els.sectionFilter.value = '';
-  applyFilters();
-});
-
-els.closeModal.addEventListener('click', () => els.modal.close());
-els.modal.addEventListener('click', (e)=> {
-  // click outside content closes
-  const rect = els.modal.getBoundingClientRect();
-  const inDialog = (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom);
-  if(!inDialog) els.modal.close();
-});
-
-// ---------- Open Library lookup ----------
-
-function storageKeyFor(b){
-  if(b.isbn) return `ol:isbn:${b.isbn}`;
-  return `ol:q:${norm(b.title)}:${norm(b.authors?.[0]||'')}`;
-}
-
-function loadCached(key){
-  try{
-    const raw = localStorage.getItem(key);
-    if(!raw) return null;
-    const obj = JSON.parse(raw);
-    // expire after 30 days
-    if(obj && obj._ts && (Date.now() - obj._ts) > 30*24*3600*1000) return null;
-    return obj;
-  }catch{ return null; }
-}
-
-function saveCached(key, obj){
-  try{
-    localStorage.setItem(key, JSON.stringify({ ...obj, _ts: Date.now() }));
-  }catch{}
-}
-
-function placeholderSvg(title){
-  const safe = (title||'').slice(0,40);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450">
-    <defs>
-      <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-        <stop stop-color="#1f2a44" offset="0"/>
-        <stop stop-color="#0f1421" offset="1"/>
-      </linearGradient>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#g)"/>
-    <text x="18" y="60" fill="rgba(255,255,255,.88)" font-family="system-ui" font-size="20" font-weight="700">${escapeXml(safe)}</text>
-    <text x="18" y="92" fill="rgba(255,255,255,.55)" font-family="system-ui" font-size="13">No cover yet</text>
-  </svg>`;
-}
-function escapeXml(s){ return (s||'').replace(/[<>&'"]/g, c=>({ '<':'&lt;','>':'&gt;','&':'&amp;',"'":'&apos;','"':'&quot;' }[c])); }
-
-async function fetchCoverAndMaybeDesc(b){
-  const key = storageKeyFor(b);
-  if(coverCache.has(key)) return coverCache.get(key);
-
-  const cached = loadCached(key);
-  if(cached){
-    coverCache.set(key, cached);
-    return cached;
-  }
-
-  let info = { coverUrl: '', description: '', source: '' };
-
-  if(b.isbn){
-    // api/books tends to provide cover + sometimes description
-    const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(b.isbn)}&format=json&jscmd=data`;
-    const data = await fetch(url).then(r=>r.json()).catch(()=>null);
-    const entry = data ? data[`ISBN:${b.isbn}`] : null;
-    if(entry){
-      info.coverUrl = entry.cover?.medium || entry.cover?.large || entry.cover?.small || '';
-      info.description = (typeof entry.description === 'string') ? entry.description : (entry.description?.value || '');
-      info.source = 'openlibrary(api/books)';
-      // if no description, try works
-      const workKey = entry.works?.[0]?.key;
-      if(!info.description && workKey){
-        const w = await fetch(`https://openlibrary.org${workKey}.json`).then(r=>r.json()).catch(()=>null);
-        info.description = (typeof w?.description === 'string') ? w.description : (w?.description?.value || '');
-        info.source = 'openlibrary(works)';
-      }
-      // If still no cover, use cover service
-      if(!info.coverUrl){
-        info.coverUrl = `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(b.isbn)}-M.jpg`;
-      }
-    } else {
-      // cover service fallback
-      info.coverUrl = `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(b.isbn)}-M.jpg`;
-      info.source = 'openlibrary(covers)';
-    }
-  }
-
-  if(!b.isbn || (!info.description && !info.coverUrl)){
-    // Search endpoint fallback
-    const title = encodeURIComponent(b.title || '');
-    const author = encodeURIComponent((b.authors && b.authors[0]) ? b.authors[0] : '');
-    const url = `https://openlibrary.org/search.json?title=${title}&author=${author}&limit=1`;
-    const res = await fetch(url).then(r=>r.json()).catch(()=>null);
-    const doc = res?.docs?.[0];
-    if(doc){
-      if(doc.cover_i){
-        info.coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`;
-      }
-      info.source = 'openlibrary(search)';
-      // description via work key
-      const workKey = doc.key; // like /works/OL...
-      if(workKey){
-        const w = await fetch(`https://openlibrary.org${workKey}.json`).then(r=>r.json()).catch(()=>null);
-        info.description = (typeof w?.description === 'string') ? w.description : (w?.description?.value || '');
-        if(!info.description && w?.subjects?.length){
-          info.description = `Subjects: ${w.subjects.slice(0,10).join(', ')}.`;
-        }
-      }
-    }
-  }
-
-  // keep it lightweight
-  if(info.description && info.description.length > 1200){
-    info.description = info.description.slice(0, 1200).trim() + '…';
-  }
-
-  coverCache.set(key, info);
-  saveCached(key, info);
-  return info;
-}
-
-// ---------- Modal ----------
-
-async function openModal(b, currentCover){
-  els.mTitle.textContent = b.title + (b.subtitle ? `: ${b.subtitle}` : '');
-  els.mBy.textContent = (b.authors && b.authors.length) ? `by ${b.authors.join(', ')}` : '';
-  els.mCover.src = currentCover || ('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(placeholderSvg(b.title)));
-  els.mDesc.textContent = 'Looking up description…';
-  els.mCatalog.innerHTML = '';
-  els.mPills.innerHTML = '';
-
-  const pills = [];
-  if(b.series) pills.push(['Series', b.series]);
-  if(b.publisher) pills.push(['Publisher', b.publisher]);
-  if(b.edition) pills.push(['Edition', b.edition]);
-  if(b.language) pills.push(['Language', b.language]);
-  if(b.section) pills.push(['Section', b.section]);
-  if(b.location) pills.push(['Location', b.location]);
-  if(b.isbn) pills.push(['ISBN', b.isbn]);
-
-  for(const [k,v] of pills.slice(0,8)){
-    const p = document.createElement('span');
-    p.className = 'pill';
-    p.textContent = `${k}: ${v}`;
-    els.mPills.appendChild(p);
-  }
-
-  const catalogLines = [];
-  if(b.callNumbers?.length) catalogLines.push(`<b>Call #</b>: ${escapeHtml(b.callNumbers.join(' • '))}`);
-  if(b.subjects) catalogLines.push(`<b>Subjects</b>: ${escapeHtml(b.subjects)}`);
-  els.mCatalog.innerHTML = catalogLines.join('<br>') || '<span style="opacity:.8">No extra catalog fields in CSV for this record.</span>';
-
-  els.modal.showModal();
-
-  try{
-    const info = await fetchCoverAndMaybeDesc(b);
-    if(info.coverUrl) els.mCover.src = info.coverUrl;
-    els.mDesc.textContent = info.description || 'No description found from Open Library for this record.';
-  }catch{
-    els.mDesc.textContent = 'Could not fetch description right now.';
-  }
-}
-
-function escapeHtml(s){
-  return (s||'').toString().replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;' }[c]));
-}
-
-// ---------- Boot ----------
-
-async function init(){
-  const res = await fetch('books.json');
-  books = await res.json();
-
-  // optional: sort by title
-  books.sort((a,b)=> (a.title||'').localeCompare((b.title||'')));
-
-  buildSectionFilter();
-  filtered = books;
-  render();
-}
-
-init().catch(err=>{
+main().catch(err => {
   console.error(err);
-  els.count.textContent = 'Failed to load books.json. Are you running a local server?';
+  els.status.textContent = "Error loading data. Check console.";
 });
