@@ -374,6 +374,7 @@ function render() {
       ? `<img class="cover" src="${escapeHtml(b.coverUrl)}" alt="Cover for ${escapeHtml(b.title)}" loading="lazy">`
       : `<div class="cover placeholder">No cover</div>`;
 
+    // ✅ NO DESCRIPTION HERE
     return `
       <div class="card clickable" data-id="${b._id}" tabindex="0" role="button"
            aria-label="Open details for ${escapeHtml(b.title || "Untitled")}">
