@@ -3,6 +3,7 @@
 // Description is shown only after clicking a book (modal).
 // Data source: books.json in your GitHub repo root.
 // Enrichment: Open Library first, Google Books fallback (better coverage).
+// Loading overlay: prevents "popping in" by rendering only once at the end.
 
 const DATA_URL = "books.json";
 
@@ -10,7 +11,7 @@ const DATA_URL = "books.json";
 const GOOGLE_BOOKS_API_KEY = "PASTE_YOUR_KEY_HERE";
 
 // Cache keys (localStorage)
-const CACHE_PREFIX = "book_enrich_v2:";
+const CACHE_PREFIX = "book_enrich_v3:";
 
 const els = {
   search: document.getElementById("search"),
@@ -18,6 +19,18 @@ const els = {
   status: document.getElementById("status"),
   genreFilter: document.getElementById("genreFilter"),
 };
+
+// Loading overlay elements (from index.html)
+const loading = {
+  overlay: document.getElementById("loadingOverlay"),
+  text: document.getElementById("loadingText"),
+};
+
+function setLoading(on, msg = "") {
+  if (!loading.overlay) return;
+  loading.overlay.style.display = on ? "flex" : "none";
+  if (loading.text && msg) loading.text.textContent = msg;
+}
 
 // Modal elements
 const modal = {
@@ -44,7 +57,7 @@ function cleanIsbn(isbn) {
 }
 
 function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function cacheGet(key) {
@@ -91,7 +104,7 @@ function bestGenreFromCategories(categories = []) {
 }
 
 function bestGenreFromSubjects(subjects = []) {
-  const s = subjects.map(x => String(x).toLowerCase());
+  const s = subjects.map((x) => String(x).toLowerCase());
 
   const rules = [
     ["Mystery / Thriller", ["mystery", "detective", "crime", "thriller", "suspense"]],
@@ -109,7 +122,7 @@ function bestGenreFromSubjects(subjects = []) {
   ];
 
   for (const [genre, keywords] of rules) {
-    if (keywords.some(k => s.some(v => v.includes(k)))) return genre;
+    if (keywords.some((k) => s.some((v) => v.includes(k)))) return genre;
   }
   return "Unknown";
 }
@@ -121,23 +134,25 @@ async function loadBooks() {
   const data = await res.json();
 
   // Be flexible about input headers (including "Auther")
-  return data.map((row, idx) => {
-    const title = pickFirstNonEmpty(row.Title, row.title, row["Book Title"], row["book title"]);
-    const author = pickFirstNonEmpty(row.Author, row.author, row.Auther, row.auther);
-    const isbnRaw = pickFirstNonEmpty(row.ISBN, row.isbn, row["ISBN-13"], row["ISBN13"], row["isbn13"]);
-    const isbn = cleanIsbn(isbnRaw);
+  return data
+    .map((row, idx) => {
+      const title = pickFirstNonEmpty(row.Title, row.title, row["Book Title"], row["book title"]);
+      const author = pickFirstNonEmpty(row.Author, row.author, row.Auther, row.auther);
+      const isbnRaw = pickFirstNonEmpty(row.ISBN, row.isbn, row["ISBN-13"], row["ISBN13"], row["isbn13"]);
+      const isbn = cleanIsbn(isbnRaw);
 
-    return {
-      _id: idx,
-      title,
-      author,
-      isbn,
-      coverUrl: "",
-      description: "",
-      genre: "Unknown",
-      source: "",
-    };
-  }).filter(b => b.title || b.author || b.isbn);
+      return {
+        _id: idx,
+        title,
+        author,
+        isbn,
+        coverUrl: "",
+        description: "",
+        genre: "Unknown",
+        source: "",
+      };
+    })
+    .filter((b) => b.title || b.author || b.isbn);
 }
 
 // ---------- Open Library ----------
@@ -204,9 +219,15 @@ async function openLibrarySearch(title, author) {
 }
 
 // ---------- Google Books (fallback) ----------
+function googleKeyOk() {
+  return GOOGLE_BOOKS_API_KEY && !GOOGLE_BOOKS_API_KEY.includes("PASTE_");
+}
+
 async function googleBooksByIsbn(isbn) {
-  if (!GOOGLE_BOOKS_API_KEY || GOOGLE_BOOKS_API_KEY.includes("PASTE_")) return null;
-  const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&key=${encodeURIComponent(GOOGLE_BOOKS_API_KEY)}`;
+  if (!googleKeyOk()) return null;
+  const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&key=${encodeURIComponent(
+    GOOGLE_BOOKS_API_KEY
+  )}`;
   const r = await fetch(url);
   if (!r.ok) return null;
   const data = await r.json();
@@ -224,12 +245,14 @@ async function googleBooksByIsbn(isbn) {
 }
 
 async function googleBooksSearch(title, author) {
-  if (!GOOGLE_BOOKS_API_KEY || GOOGLE_BOOKS_API_KEY.includes("PASTE_")) return null;
+  if (!googleKeyOk()) return null;
   let q = "";
   if (title) q += `intitle:${title}`;
   if (author) q += (q ? "+" : "") + `inauthor:${author}`;
 
-  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1&key=${encodeURIComponent(GOOGLE_BOOKS_API_KEY)}`;
+  const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=1&key=${encodeURIComponent(
+    GOOGLE_BOOKS_API_KEY
+  )}`;
   const r = await fetch(url);
   if (!r.ok) return null;
   const data = await r.json();
@@ -314,7 +337,9 @@ function openModal(book) {
   modal.desc.textContent = book.description || "No description found.";
 
   if (book.coverUrl) {
-    modal.coverWrap.innerHTML = `<img src="${escapeHtml(book.coverUrl)}" alt="Cover for ${escapeHtml(book.title || "Untitled")}">`;
+    modal.coverWrap.innerHTML = `<img src="${escapeHtml(book.coverUrl)}" alt="Cover for ${escapeHtml(
+      book.title || "Untitled"
+    )}">`;
   } else {
     modal.coverWrap.innerHTML = `<div class="cover placeholder" style="width:220px;height:330px;border-radius:12px;">No cover</div>`;
   }
@@ -338,44 +363,40 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- UI ----------
 function buildGenreFilter(books) {
-  const genres = Array.from(new Set(books.map(b => b.genre || "Unknown")))
-    .map(g => g || "Unknown")
+  const genres = Array.from(new Set(books.map((b) => b.genre || "Unknown")))
+    .map((g) => g || "Unknown")
     .sort((a, b) => a.localeCompare(b));
 
   els.genreFilter.innerHTML =
-    `<option value="">All Genres</option>` +
-    genres.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
+    `<option value="">All Genres</option>` + genres.map((g) => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
 }
 
 function matchesSearch(b, q) {
   if (!q) return true;
   q = q.toLowerCase();
-  return (
-    (b.title || "").toLowerCase().includes(q) ||
-    (b.author || "").toLowerCase().includes(q) ||
-    (b.isbn || "").toLowerCase().includes(q)
-  );
+  return (b.title || "").toLowerCase().includes(q) || (b.author || "").toLowerCase().includes(q) || (b.isbn || "").toLowerCase().includes(q);
 }
 
 function render() {
   const q = norm(els.search?.value).toLowerCase();
   const g = els.genreFilter?.value || "";
 
-  const filtered = ENRICHED.filter(b => {
+  const filtered = ENRICHED.filter((b) => {
     const okSearch = matchesSearch(b, q);
-    const okGenre = !g || (b.genre === g);
+    const okGenre = !g || b.genre === g;
     return okSearch && okGenre;
   });
 
   els.status.textContent = `${filtered.length} book(s)`;
 
-  els.results.innerHTML = filtered.map(b => {
-    const cover = b.coverUrl
-      ? `<img class="cover" src="${escapeHtml(b.coverUrl)}" alt="Cover for ${escapeHtml(b.title)}" loading="lazy">`
-      : `<div class="cover placeholder">No cover</div>`;
+  // ✅ NO DESCRIPTION IN MAIN GRID
+  els.results.innerHTML = filtered
+    .map((b) => {
+      const cover = b.coverUrl
+        ? `<img class="cover" src="${escapeHtml(b.coverUrl)}" alt="Cover for ${escapeHtml(b.title)}" loading="lazy">`
+        : `<div class="cover placeholder">No cover</div>`;
 
-    // ✅ NO DESCRIPTION HERE
-    return `
+      return `
       <div class="card clickable" data-id="${b._id}" tabindex="0" role="button"
            aria-label="Open details for ${escapeHtml(b.title || "Untitled")}">
         ${cover}
@@ -385,14 +406,14 @@ function render() {
           <div class="isbn">ISBN: ${escapeHtml(b.isbn || "—")}</div>
           <div class="genre">Genre: ${escapeHtml(b.genre || "Unknown")}</div>
         </div>
-      </div>
-    `;
-  }).join("");
+      </div>`;
+    })
+    .join("");
 
   // Attach click/keyboard handlers
-  els.results.querySelectorAll(".card.clickable").forEach(card => {
+  els.results.querySelectorAll(".card.clickable").forEach((card) => {
     const id = Number(card.dataset.id);
-    const book = ENRICHED.find(x => x._id === id);
+    const book = ENRICHED.find((x) => x._id === id);
     if (!book) return;
 
     card.addEventListener("click", () => openModal(book));
@@ -407,19 +428,21 @@ function render() {
 
 // ---------- init ----------
 async function main() {
-  els.status.textContent = "Loading books…";
+  setLoading(true, "Loading book list…");
+  els.status.textContent = "Loading…";
+
   BOOKS = await loadBooks();
 
-  els.status.textContent = `Enriching ${BOOKS.length} books…`;
+  setLoading(true, `Enriching ${BOOKS.length} books (covers/genres/descriptions)…`);
   ENRICHED = [];
 
   for (let i = 0; i < BOOKS.length; i++) {
     const e = await enrichBook(BOOKS[i]);
     ENRICHED.push(e);
 
-    if (i % 10 === 0) {
-      els.status.textContent = `Enriching… ${i + 1}/${BOOKS.length}`;
-      render();
+    // Update loading message occasionally (no rendering = no popping)
+    if (i % 15 === 0) {
+      setLoading(true, `Enriching… ${i + 1}/${BOOKS.length}`);
     }
 
     // Tiny delay helps avoid rate limits
@@ -432,10 +455,16 @@ async function main() {
   els.genreFilter?.addEventListener("change", render);
 
   els.status.textContent = `Loaded ${ENRICHED.length} books`;
+
+  // ✅ Render once at the end
   render();
+
+  // ✅ Hide overlay
+  setLoading(false);
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(err);
   els.status.textContent = "Error loading data. Check console.";
+  setLoading(true, "Error loading data — open the console for details.");
 });
