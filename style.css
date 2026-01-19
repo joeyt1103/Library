@@ -233,3 +233,47 @@ input[type="search"]:focus, select:focus {
     max-height: 420px;
   }
 }
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 15, 22, 0.92);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.loading-box {
+  width: min(420px, 92vw);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius);
+  padding: 18px 18px 16px;
+  text-align: center;
+}
+
+.loading-title {
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+.loading-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  border: 4px solid rgba(233, 238, 247, 0.18);
+  border-top-color: rgba(233, 238, 247, 0.9);
+  margin: 0 auto;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
