@@ -104,6 +104,12 @@ input[type="search"]:focus, select:focus {
   border-radius: var(--radius);
 }
 
+.card.clickable { cursor: pointer; }
+.card.clickable:focus {
+  outline: 2px solid rgba(120, 180, 255, 0.55);
+  outline-offset: 2px;
+}
+
 .cover {
   width: 92px;
   height: 140px;
@@ -142,17 +148,6 @@ input[type="search"]:focus, select:focus {
   margin-top: 4px;
 }
 
-.desc {
-  margin-top: 8px;
-  font-size: 13px;
-  line-height: 1.35;
-  color: rgba(233, 238, 247, 0.92);
-  display: -webkit-box;
-  -webkit-line-clamp: 6;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
 .footer {
   border-top: 1px solid var(--border);
   color: var(--muted);
@@ -160,8 +155,81 @@ input[type="search"]:focus, select:focus {
   padding-bottom: 18px;
 }
 
+/* ---------- Modal ---------- */
+.hidden { display: none !important; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 1000;
+}
+
+.modal {
+  width: min(900px, 100%);
+  background: #0b0f16;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: relative;
+}
+
+.modal-close {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+  color: #e9eef7;
+  border-radius: 10px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.modal-body {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  padding: 16px;
+}
+
+.modal-body img {
+  width: 220px;
+  height: 330px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.06);
+}
+
+.modal-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.modal-desc {
+  margin-top: 12px;
+  line-height: 1.45;
+  color: rgba(233, 238, 247, 0.92);
+  white-space: pre-wrap;
+}
+
 @media (max-width: 680px) {
   .controls { grid-template-columns: 1fr; }
   .card { grid-template-columns: 80px 1fr; }
   .cover { width: 80px; height: 122px; }
+
+  .modal-body {
+    grid-template-columns: 1fr;
+  }
+  .modal-body img {
+    width: 100%;
+    height: auto;
+    max-height: 420px;
+  }
 }
