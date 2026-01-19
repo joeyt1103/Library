@@ -44,7 +44,26 @@
     </small>
   </footer>
 
+  <!-- Book Details Modal -->
+  <div id="modalBackdrop" class="modal-backdrop hidden" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button id="modalClose" class="modal-close" aria-label="Close">✕</button>
+
+      <div class="modal-body">
+        <div id="modalCoverWrap"></div>
+
+        <div class="modal-info">
+          <h2 id="modalTitle"></h2>
+          <div id="modalAuthor" class="modal-sub"></div>
+          <div id="modalIsbn" class="modal-sub"></div>
+          <div id="modalGenre" class="modal-sub"></div>
+
+          <p id="modalDesc" class="modal-desc"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
-
