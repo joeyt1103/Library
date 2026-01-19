@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Library Search</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">📚</div>
+      <div>
+        <div class="title">Library Search</div>
+        <div class="subtitle">Search your CSV • Auto-fetch covers & descriptions</div>
+      </div>
+    </div>
+
+    <div class="search">
+      <input id="q" type="search" placeholder="Search title, author, subject, ISBN…" autocomplete="off" />
+      <select id="sectionFilter">
+        <option value="">All sections</option>
+      </select>
+      <button id="clearBtn" title="Clear">Clear</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="meta">
+      <div id="count">Loading…</div>
+      <div class="hint">Tip: click a book for more details. Results are cached in your browser to stay fast.</div>
+    </div>
+
+    <div id="grid" class="grid"></div>
+
+    <dialog id="modal">
+      <div class="modalHeader">
+        <div>
+          <div id="mTitle" class="mTitle"></div>
+          <div id="mBy" class="mBy"></div>
+        </div>
+        <button id="closeModal" class="iconBtn" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modalBody">
+        <img id="mCover" class="mCover" alt="Cover" />
+        <div class="mInfo">
+          <div class="pillRow" id="mPills"></div>
+          <div class="mLabel">Description</div>
+          <div id="mDesc" class="mDesc">Looking up description…</div>
+
+          <div class="mLabel">Catalog info</div>
+          <div id="mCatalog" class="mCatalog"></div>
+        </div>
+      </div>
+    </dialog>
+  </main>
+
+  <footer class="footer">
+    Data source: books.json (generated from your CSV). Cover/description lookup: Open Library (where available).
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
