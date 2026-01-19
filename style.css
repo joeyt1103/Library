@@ -1,0 +1,39 @@
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0b0e14;color:#e8eefc}
+a{color:inherit}
+.topbar{position:sticky;top:0;z-index:5;background:rgba(11,14,20,.92);backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,255,255,.08);padding:14px 16px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.brand{display:flex;gap:12px;align-items:center}
+.logo{font-size:28px}
+.title{font-weight:700;font-size:18px}
+.subtitle{opacity:.75;font-size:12px}
+.search{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.search input,.search select{background:#141a27;border:1px solid rgba(255,255,255,.12);color:#e8eefc;border-radius:10px;padding:10px 12px;min-width:260px;outline:none}
+.search select{min-width:180px}
+.search button{background:#1f2a44;border:1px solid rgba(255,255,255,.12);color:#e8eefc;border-radius:10px;padding:10px 12px;cursor:pointer}
+.search button:hover{filter:brightness(1.08)}
+main{padding:18px 16px 40px;max-width:1200px;margin:0 auto}
+.meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.hint{opacity:.7;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
+.card{background:#111827;border:1px solid rgba(255,255,255,.1);border-radius:14px;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;min-height:260px}
+.card:hover{border-color:rgba(255,255,255,.22)}
+.cover{width:100%;aspect-ratio:2/3;object-fit:cover;background:linear-gradient(135deg,#222a3a,#0f1421)}
+.cardBody{padding:10px 10px 12px;display:flex;flex-direction:column;gap:6px}
+.cardTitle{font-weight:650;font-size:13px;line-height:1.2}
+.cardBy{opacity:.8;font-size:12px;line-height:1.2}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}
+.badge{font-size:11px;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.1);opacity:.9}
+.footer{padding:18px 16px;border-top:1px solid rgba(255,255,255,.08);opacity:.75;font-size:12px}
+dialog{border:none;border-radius:16px;max-width:920px;width:min(920px,96vw);background:#0f1421;color:#e8eefc;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+.modalHeader{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:16px 16px 8px;border-bottom:1px solid rgba(255,255,255,.08)}
+.iconBtn{background:transparent;border:1px solid rgba(255,255,255,.12);color:#e8eefc;border-radius:10px;padding:8px 10px;cursor:pointer}
+.modalBody{display:grid;grid-template-columns:240px 1fr;gap:16px;padding:16px}
+.mCover{width:240px;aspect-ratio:2/3;object-fit:cover;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:linear-gradient(135deg,#222a3a,#0f1421)}
+.mTitle{font-size:20px;font-weight:800}
+.mBy{opacity:.8;margin-top:4px}
+.mLabel{margin-top:12px;opacity:.75;font-size:12px}
+.mDesc{margin-top:8px;line-height:1.45;white-space:pre-wrap}
+.mCatalog{margin-top:8px;opacity:.9;font-size:13px;line-height:1.4}
+.pillRow{display:flex;gap:8px;flex-wrap:wrap}
+.pill{font-size:12px;padding:6px 10px;border-radius:999px;background:rgba(91,140,255,.14);border:1px solid rgba(91,140,255,.25)}
+@media(max-width:720px){.modalBody{grid-template-columns:1fr}.mCover{width:100%}}
