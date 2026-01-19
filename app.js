@@ -5,7 +5,7 @@
 // Enrichment: Open Library first, Google Books fallback (better coverage).
 // Loading overlay: prevents "popping in" by rendering only once at the end.
 
-const DATA_URL = "books.json";
+const DATA_URL = "enriched_books.json";
 
 // ✅ Put your Google Books API key here (and restrict it by referrer in Google Cloud)
 const GOOGLE_BOOKS_API_KEY = "PASTE_YOUR_KEY_HERE";
